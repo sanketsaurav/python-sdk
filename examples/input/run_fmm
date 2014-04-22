@@ -1,0 +1,9 @@
+#!/bin/bash
+
+index=$( printf "%.0f" ${index} )
+
+mkdir -p dir/subdir
+echo results > dir/subdir/output.$index.txt
+
+
+
