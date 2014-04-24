@@ -28,12 +28,12 @@ def run_job(api_key):
                              'input')
 
     template_file = upload(c, os.path.join(input_dir, 'run_fmm'))
-    input_files = [upload(c, os.path.join(input, p))
+    input_files = [upload(c, os.path.join(input_dir, p))
                    for p in ['hello.txt.zip', 'world.txt.zip']]
 
     # Create parameter sweep
     job_data = {
-        'name': 'Test Job',
+        'name': 'DOE Test Job',
         'jobvariables': [
             {'name': 'index',
              'variableType': 'Param',
