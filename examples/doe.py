@@ -45,7 +45,7 @@ def run_job(api_key):
         'jobanalyses': [
             {'analysis': {'code': 'user_included'},
              'command': './run_fmm',
-             'hardware': {'coresPerSlot': 1, 'coreType': 'Standard'},
+             'hardware': {'coresPerSlot': 1, 'coreType': 'standard'},
              'templateTasks': [
                 {'processedFilename': 'run_fmm',
                  'templateFile': {'id': template_file['id']}}

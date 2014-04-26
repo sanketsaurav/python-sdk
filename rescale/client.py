@@ -8,6 +8,9 @@ class RescaleClient(object):
         self.api_key = api_key
         self.url = url
 
+    def get_core_types(self):
+        return self._request('GET', 'api/coretypes/').json()
+
     def upload_file(self, fp):
         return self._request(
             'PUT', 'api/files/contents/', files={'file': fp}).json()
