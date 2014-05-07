@@ -1,24 +1,7 @@
 import os
 import sys
 import time
-from client import RescaleFile, RescaleJob
-
-
-def upload(client, path):
-    with open(path) as fp:
-        return client.upload_file(fp)
-
-
-def wait_for_completion(client, job):
-    while True:
-        response = client.get_status(job['id'])
-        latest_status = next(response, None)
-        if latest_status and latest_status['status'] == 'Completed':
-            print(latest_status)
-            return
-
-        time.sleep(30)
-
+from rescale.client import RescaleFile, RescaleJob
 
 def main():
     
@@ -65,8 +48,9 @@ def main():
     # wait for job to complete
     job.wait()
 
+    # download all files to a 'output' folder
     for file in job.get_files():
-        print(file)
+
         file_path = os.path.join('output',*file.path.split('/')[4:])
         file_dir = os.path.dirname(file_path)
         
