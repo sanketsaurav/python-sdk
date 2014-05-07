@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from rescale.client import RescaleClient
+from client import RescaleFile, RescaleJob
 
 
 def upload(client, path):
@@ -14,24 +14,25 @@ def wait_for_completion(client, job):
         response = client.get_status(job['id'])
         latest_status = next(response, None)
         if latest_status and latest_status['status'] == 'Completed':
-            print latest_status
+            print(latest_status)
             return
 
         time.sleep(30)
 
 
-def run_job(api_key):
-    c = RescaleClient(api_key)
-
-    # Upload files
+def main():
+    
+    # get relative path to auxiliary files
     input_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                              'input')
 
-    template_file = upload(c, os.path.join(input_dir, 'run_fmm'))
-    input_files = [upload(c, os.path.join(input_dir, p))
-                   for p in ['hello.txt.zip', 'world.txt.zip']]
-
-    # Create parameter sweep
+    # upload files
+    template_file = RescaleFile(file_path=os.path.join(input_dir, 'run_fmm'))
+    input_files = []
+    for file in ['hello.txt.zip', 'world.txt.zip']:
+        input_files.append( RescaleFile( file_path=os.path.join(input_dir, file) ) )
+    
+    # create parameter sweep dictionary
     job_data = {
         'name': 'DOE Test Job',
         'jobvariables': [
@@ -44,43 +45,37 @@ def run_job(api_key):
         ],
         'jobanalyses': [
             {'analysis': {'code': 'user_included'},
-             'command': './run_fmm',
+             'command': './{command}'.format(command=template_file.name),
              'hardware': {'coresPerSlot': 1, 'coreType': 'standard'},
              'templateTasks': [
-                {'processedFilename': 'run_fmm',
-                 'templateFile': {'id': template_file['id']}}
+                {'processedFilename': template_file.name,
+                 'templateFile': {'id': template_file.id}}
              ],
-             'inputFiles': [{'id': i['id']} for i in input_files]
+             'inputFiles': [{'id': rescale_file.id} for rescale_file in input_files]
             }
         ]
     }
+    
+    # create parameter sweep job from dictionary
+    job = RescaleJob(json_data=job_data)
+    
+    # submit job
+    job.submit()
+    
+    # wait for job to complete
+    job.wait()
 
-    job = c.create_job(job_data)
-    # Submit
-    c.submit_job(job['id'])
-
-    # Poll and wait for completion
-    wait_for_completion(c, job)
-
-    # Download results as flat list
-    output_files = c.get_files(job['id'])
-    for output in output_files:
-        # TODO: Return back the friendly-path from the API... This is gross.
-        parent = os.path.dirname(output['path'])
-        path_segments = ['output'] + parent.split('/')[5:] + [output['name']]
-        dest = os.path.join(*path_segments)
-
-        parent_dir = os.path.dirname(dest)
-        if parent_dir and not os.path.isdir(parent_dir):
-            os.makedirs(parent_dir)
-
-        response = c.download_file(output['id'])
-        with open(dest, 'wb') as fp:
-            for chunk in response.iter_content(8192):
-                fp.write(chunk)
-        print 'Wrote {dest} ({size})'.format(
-            dest=dest, size=output['decryptedSize'])
-
+    for file in job.get_files():
+        print(file)
+        file_path = os.path.join('output',*file.path.split('/')[4:])
+        file_dir = os.path.dirname(file_path)
+        
+        if not os.path.isdir(file_dir):
+            os.makedirs(file_dir)
+        
+        file.download(target=file_path)
 
 if __name__ == '__main__':
-    run_job(sys.argv[1])
+    main()
+
+main()
