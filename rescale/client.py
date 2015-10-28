@@ -53,8 +53,9 @@ class RescaleConnect(object):
 class RescaleFile(RescaleConnect):
 
     def __init__(self, api_key=None, id=None, file_path=None, json_data=None):
-        self.api_key  = api_key or RescaleConnect.api_key
-        
+        self.api_key = api_key or RescaleConnect.api_key
+        self.name = os.path.basename(file_path)
+
         if id is not None:
             json_data = self._request('GET', 'files/{id}'.format(id=id)).json()
 
