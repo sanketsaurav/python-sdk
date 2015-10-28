@@ -31,7 +31,8 @@ def main():
         'jobanalyses': [
             {'analysis': {'code': 'user_included'},
              'command': './{command}'.format(command=template_file.name),
-             'hardware': {'coresPerSlot': 1, 'coreType': 'standard'},
+             'hardware': {'coresPerSlot': 1,
+                          'coreType': {'code': 'standard-plus'}},
              'templateTasks': [
                 {'processedFilename': template_file.name,
                  'templateFile': {'id': template_file.id}}

@@ -11,7 +11,7 @@ class RescaleConnect(object):
         api_key = os.environ['RESCALE_API_KEY']
     except:
         api_key = None
-    _root_url = 'https://platform.rescale.com/api/'
+    _root_url = 'https://platform.rescale.com/api/v3/'
     _page_size = 100
 
     def __repr__(self):
