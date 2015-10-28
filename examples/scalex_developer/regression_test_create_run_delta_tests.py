@@ -8,7 +8,7 @@ import testlib
 from rescale.client import RescaleConnect, RescaleFile, RescaleJob
 
 BASE_JOB_RE = re.compile('^build[0-9\.]+-testcase[0-9\.]+$')
-DRY_RUN = False
+DRY_RUN = True
 
 
 def get_base_test_job_ids():

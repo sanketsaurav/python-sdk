@@ -43,11 +43,19 @@ case archive basename>`. *This script does not actually run any jobs*,
 it just stages input files and creates unsubmitted jobs to be used by
 the next script.
 
+You should update the `*_COMMAND` variable at the top of this script
+to be the actual command line to run a test with your build.
+
 `regression_test_create_run_delta_tests.py` is to be run every time
 there is a new build available and test jobs should be run. A new job
 will be cloned from the base jobs and then submitted to run. The
 DELTA_ARCHIVE file will be unpacked on top of the base full build tree
 in the job work directory before running.
+
+*This script currently has a `DRY_RUN` sentinel variable set that will
+prevent the created jobs from actually running.* We recommend you run
+this first on a sample of your tests and check in the Rescale portal
+that your generated jobs look correct befure turning off dry-run mode.
 
 Potential enhancements to be made to this example:
 
@@ -58,3 +66,4 @@ Potential enhancements to be made to this example:
   (right now each test is run on a 1-core Nickel cluster)
 - Support additional methods for updating base build with incremental
   deltas
+- Support parameterized command lines for test jobs
