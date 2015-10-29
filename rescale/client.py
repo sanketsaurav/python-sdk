@@ -1,5 +1,6 @@
 import urllib.parse
 import json
+import logging
 import time
 import os
 
@@ -46,7 +47,11 @@ class RescaleConnect(object):
                                         self._root_url, relative_url),
                                     headers=headers,
                                     **kwargs)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            logging.error(response.content)
+            raise e
         return response
 
 
@@ -54,13 +59,13 @@ class RescaleFile(RescaleConnect):
 
     def __init__(self, api_key=None, id=None, file_path=None, json_data=None):
         self.api_key = api_key or RescaleConnect.api_key
-        self.name = os.path.basename(file_path)
 
         if id is not None:
             json_data = self._request('GET', 'files/{id}'.format(id=id)).json()
 
         if file_path is not None:
             json_data = self._upload_file(file_path)
+            self.name = os.path.basename(file_path)
 
         if json_data is not None:
             self._populate(json_data)
