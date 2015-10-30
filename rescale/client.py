@@ -27,8 +27,9 @@ class RescaleConnect(object):
 
     # Looks like this will not work properly if people are deleting things.
     def _paginate(self, url):
-        response = self._request('GET', '{url}?page_size={page_size}'.format(
-            url=url, page_size=self._page_size)).json()
+        connector = '&' if '?' in url else '?'
+        response = self._request('GET', '{url}{connector}page_size={page_size}'.format(
+            url=url, connector=connector, page_size=self._page_size)).json()
         while True:
             for r in response['results']:
                 yield r
@@ -53,6 +54,11 @@ class RescaleConnect(object):
             logging.error(response.content)
             raise e
         return response
+
+    @staticmethod
+    def get_core_types():
+        return [{'name': ct['name'], 'code': ct['code']} for ct in
+                RescaleConnect()._paginate('coretypes/')]
 
 
 class RescaleFile(RescaleConnect):
@@ -87,6 +93,16 @@ class RescaleFile(RescaleConnect):
             for chunk in response.iter_content(8192):
                 fp.write(chunk)
 
+    @staticmethod
+    def search(name):
+        query = urllib.parse.urlencode((('search', name),))
+        for json_data in RescaleConnect()._paginate('files/?{0}'.format(query)):
+            yield RescaleFile(json_data=json_data)
+
+    @staticmethod
+    def get_newest_by_name(name):
+        return next(RescaleFile.search(name))
+
 
 class RescaleJob(RescaleConnect):
 
@@ -110,6 +126,12 @@ class RescaleJob(RescaleConnect):
     def get_files(self):
         for json_data in self._paginate('jobs/{job_id}/files/'.format(job_id=self.id)):
             yield RescaleFile(self.api_key, json_data=json_data)
+
+    def get_file(self, name):
+        query = urllib.parse.urlencode((('search', name),))
+        results = self._paginate('jobs/{job_id}/files/?{query}'
+                                 .format(job_id=self.id, query=query))
+        return next(results)
 
     def submit(self):
         return self._request('POST', 'jobs/{job_id}/submit/'.format(job_id=self.id))
