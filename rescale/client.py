@@ -101,7 +101,7 @@ class RescaleFile(RescaleConnect):
 
     @staticmethod
     def get_newest_by_name(name):
-        return next(RescaleFile.search(name))
+        return next(RescaleFile.search(name), None)
 
 
 class RescaleJob(RescaleConnect):
@@ -131,7 +131,7 @@ class RescaleJob(RescaleConnect):
         query = urllib.parse.urlencode((('search', name),))
         results = self._paginate('jobs/{job_id}/files/?{query}'
                                  .format(job_id=self.id, query=query))
-        return next(results)
+        return next(results, None)
 
     def submit(self):
         return self._request('POST', 'jobs/{job_id}/submit/'.format(job_id=self.id))
