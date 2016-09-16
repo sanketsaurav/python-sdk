@@ -1,10 +1,19 @@
-import urllib.parse
 import json
 import logging
 import time
 import os
 
 import requests
+
+try:
+    # python 3 required
+    import urllib.parse
+except ImportError:
+    # monkeypatch for python 2 compat
+    import urllib
+    import urlparse
+    urlparse.urlencode = urllib.urlencode
+    urllib.parse = urlparse
 
 
 class RescaleConnect(object):
@@ -40,7 +49,7 @@ class RescaleConnect(object):
     def _request(self, method, relative_url,
                  **kwargs):
         headers = {'Authorization': 'Token ' + self.api_key}
-        if not 'files' in kwargs:
+        if 'files' not in kwargs:
             headers['Content-Type'] = 'application/json'
 
         response = requests.request(method,
