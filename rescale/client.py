@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import os
+import re
 
 import requests
 
@@ -187,3 +188,21 @@ class RescaleJob(RescaleConnect):
     def wait(self, refresh_rate=60):
         while not self.get_latest_status()['status'] == 'Completed':
             time.sleep(refresh_rate)
+
+    def userlogs(self):
+        uri = 'jobs/{job_id}/logs/?limit=10000'.format(job_id=self.id)
+        return self._request('GET', uri).json()
+
+    def connection_info(self):
+        SSH_LOG_RE = re.compile('.*Command: ssh -i </path/to/key> (\S+);.*')
+        info = set()
+        for log in self.userlogs():
+            m = SSH_LOG_RE.match(log['message'])
+            if m:
+                info.add(m.group(1))
+        return info
+
+
+def list_running_jobs():
+    connection = RescaleConnect()
+    return connection._paginate('jobs/?t=1')
