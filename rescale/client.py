@@ -1,3 +1,5 @@
+import argparse
+import ConfigParser
 import json
 import logging
 import time
@@ -15,14 +17,49 @@ except ImportError:
     urlparse.urlencode = urllib.urlencode
     urllib.parse = urlparse
 
+API_CONFIG_FILE = '~/.config/rescale/apiconfig'
+DEFAULT_API_URL = 'https://platform.rescale.com/api/v3/'
+
+
+class RescaleConfig(object):
+
+    def __init__(self, profile='default'):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--profile', default=profile)
+        args = parser.parse_args()
+        self.profile = args.profile
+        self.config = ConfigParser.ConfigParser()
+        self.config.read([os.path.expanduser(API_CONFIG_FILE)])
+        if not self.config.has_section(self.profile):
+            raise ValueError('Unknown profile name: ' + self.profile)
+
+    def apikey(self):
+        try:
+            return os.environ['RESCALE_API_KEY']
+        except:
+            try:
+                return self.config.get(self.profile, 'apikey')
+            except:
+                return None
+
+    def apiurl(self):
+        try:
+            return os.environ['RESCALE_API_URL']
+        except:
+            try:
+                url = self.config.get(self.profile, 'apiurl')
+                return url if url else DEFAULT_API_URL
+            except:
+                return DEFAULT_API_URL
+
 
 class RescaleConnect(object):
-    try:
-        api_key = os.environ['RESCALE_API_KEY']
-    except:
-        api_key = None
-    _root_url = 'https://platform.rescale.com/api/v3/'
-    _page_size = 100
+
+    def __init__(self):
+        config = RescaleConfig()
+        self.api_key = config.apikey()
+        self._root_url = config.apiurl()
+        self._page_size = 100
 
     def __repr__(self):
         return json.dumps(self._raw_data, sort_keys=True,
@@ -73,7 +110,8 @@ class RescaleConnect(object):
 class RescaleFile(RescaleConnect):
 
     def __init__(self, api_key=None, id=None, file_path=None, json_data=None):
-        self.api_key = api_key or RescaleConnect.api_key
+        super(RescaleFile, self).__init__()
+        self.api_key = api_key or self.api_key
 
         if id is not None:
             json_data = self._request('GET', 'files/{id}'.format(id=id)).json()
@@ -116,7 +154,8 @@ class RescaleFile(RescaleConnect):
 class RescaleJob(RescaleConnect):
 
     def __init__(self, api_key=None, id=None, json_data=None):
-        self.api_key = api_key or RescaleConnect.api_key
+        super(RescaleJob, self).__init__()
+        self.api_key = api_key or self.api_key
 
         if id is not None:
             self._populate(self._request(
