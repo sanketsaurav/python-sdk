@@ -1,7 +1,14 @@
-import argparse
-import ConfigParser
+
+from datetime import datetime
+try:
+    import ConfigParser as configparser
+except ModuleNotFoundError:
+    import configparser
+import dateutil.parser
 import json
 import logging
+import math
+import pytz
 import time
 import os
 import re
@@ -24,12 +31,11 @@ DEFAULT_API_URL = 'https://platform.rescale.com/api/v3/'
 
 class RescaleConfig(object):
 
-    def __init__(self, profile='default'):
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--profile', default=profile)
-        args = parser.parse_args()
-        self.profile = args.profile
-        self.config = ConfigParser.ConfigParser()
+    def __init__(self, profile=None):
+        if not profile:
+            profile = 'default'
+        self.profile = profile
+        self.config = configparser.ConfigParser()
         self.config.read([os.path.expanduser(API_CONFIG_FILE)])
         if not self.config.has_section(self.profile):
             raise ValueError('Unknown profile name: ' + self.profile)
@@ -56,8 +62,9 @@ class RescaleConfig(object):
 
 class RescaleConnect(object):
 
-    def __init__(self):
-        config = RescaleConfig()
+    def __init__(self, config=None):
+        if config is None:
+            config = RescaleConfig()
         self.api_key = config.apikey()
         self._root_url = config.apiurl()
         self._page_size = 100
@@ -78,7 +85,7 @@ class RescaleConnect(object):
         response = self._request('GET', '{url}{connector}page_size={page_size}'.format(
             url=url, connector=connector, page_size=self._page_size)).json()
         while True:
-            for r in response['results']:
+            for r in response.get('results', response.get('result')):
                 yield r
             if not response['next']:
                 return
@@ -110,8 +117,8 @@ class RescaleConnect(object):
 
 class RescaleFile(RescaleConnect):
 
-    def __init__(self, api_key=None, id=None, file_path=None, json_data=None):
-        super(RescaleFile, self).__init__()
+    def __init__(self, api_key=None, id=None, file_path=None, json_data=None, config=None):
+        super(RescaleFile, self).__init__(config=config)
         self.api_key = api_key or self.api_key
 
         if id is not None:
@@ -142,25 +149,25 @@ class RescaleFile(RescaleConnect):
                 fp.write(chunk)
 
     @staticmethod
-    def search(name):
+    def search(name, config=None):
         query = urllib.parse.urlencode((('search', name),))
-        for json_data in RescaleConnect()._paginate('files/?{0}'.format(query)):
+        for json_data in RescaleConnect(config=config)._paginate('files/?{0}'.format(query)):
             yield RescaleFile(json_data=json_data)
 
     @staticmethod
-    def get_newest_by_name(name):
-        return next(RescaleFile.search(name), None)
+    def get_newest_by_name(name, config=None):
+        return next(RescaleFile.search(name, config=config), None)
 
 
 class RescaleJob(RescaleConnect):
 
-    def __init__(self, api_key=None, id=None, json_data=None):
-        super(RescaleJob, self).__init__()
+    def __init__(self, api_key=None, id=None, json_data=None, config=None):
+        super(RescaleJob, self).__init__(config=config)
         self.api_key = api_key or self.api_key
 
         if id is not None:
             self._populate(self._request(
-                'GET', 'jobs/{id}'.format(id=id)).json())
+                'GET', 'jobs/{id}/'.format(id=id)).json())
 
         if json_data is not None:
             self._populate(self._request('POST',
@@ -185,6 +192,9 @@ class RescaleJob(RescaleConnect):
     def submit(self):
         return self._request('POST', 'jobs/{job_id}/submit/'.format(job_id=self.id))
 
+    def delete(self):
+        return self._request('DELETE', 'jobs/{job_id}/'.format(job_id=self.id))
+
     def wait(self, refresh_rate=60):
         while not self.get_latest_status()['status'] == 'Completed':
             time.sleep(refresh_rate)
@@ -202,7 +212,67 @@ class RescaleJob(RescaleConnect):
                 info.add(m.group(1))
         return info
 
+    def get_all_metrics(self, period=300):
+        statuses = self.get_statuses()
+        start_date = min({dateutil.parser.parse(s['statusDate'])
+                          for s in statuses})
+        if 'Completed' in [s['status'] for s in statuses]:
+            end_date = max({dateutil.parser.parse(s['statusDate'])
+                            for s in statuses})
+        else:
+            end_date = datetime.now(tz=pytz.utc)
+        offset = math.ceil((end_date - start_date).total_seconds() / 3600)
+
+        task = self._request('GET', 'jobs/{job_id}/servers/load/'
+                             '?offset={offset}&period={period}'
+                             .format(job_id=self.id,
+                                     offset=offset,
+                                     period=period)).json()
+        tasks = [task['token']]
+        print('fetching {0} pages of metrics'.format(task['totalPages']))
+        for page in range(1, task['totalPages']):
+            tasks.append(self._request('GET', 'jobs/{job_id}/servers/load/'
+                                       '?offset={offset}'
+                                       '&period={period}'
+                                       '&p={page}'
+                                       .format(job_id=self.id,
+                                               offset=offset,
+                                               page=page,
+                                               period=period)).json()['token'])
+        results = []
+        for task in tasks:
+            print('getting task {0}'.format(task))
+            status = {'ready': False}
+            while not status['ready']:
+                status = self._request('GET', 'tasks/{taskid}/'.format(taskid=task)).json()
+                time.sleep(10)
+            results += status['result']
+        return results
+
+
+class RescaleCluster(RescaleConnect):
+
+    def __init__(self, api_key=None, id=None, json_data=None, config=None):
+        super(RescaleCluster, self).__init__(config=config)
+        self.api_key = api_key or self.api_key
+
+        if id is not None:
+            self._populate(self._request(
+                'GET', 'clusters/{id}/'.format(id=id)).json())
+
+        if json_data is not None:
+            self._populate(self._request('POST',
+                                         'clusters/', data=json.dumps(json_data)).json())
+
+    def get_statuses(self):
+        return self._paginate('clusters/{cluster_id}/statuses/'.format(cluster_id=self.id))
+
 
 def list_running_jobs():
     connection = RescaleConnect()
     return connection._paginate('jobs/?t=1')
+
+
+def list_running_clusters():
+    connection = RescaleConnect()
+    return connection._paginate('clusters/')
