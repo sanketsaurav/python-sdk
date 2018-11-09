@@ -1,8 +1,7 @@
-
 from datetime import datetime
 try:
     import ConfigParser as configparser
-except ModuleNotFoundError:
+except ImportError:
     import configparser
 import dateutil.parser
 import json
@@ -244,10 +243,19 @@ class RescaleJob(RescaleConnect):
             print('getting task {0}'.format(task))
             status = {'ready': False}
             while not status['ready']:
-                status = self._request('GET', 'tasks/{taskid}/'.format(taskid=task)).json()
+                status = self._request('GET',
+                                       'tasks/{taskid}/'
+                                       .format(taskid=task)).json()
                 time.sleep(10)
             results += status['result']
         return results
+
+    def wait_for_executing(self):
+        latest_status = None
+        while latest_status is None or \
+              latest_status['status'] != 'Executing':
+            time.sleep(30)
+            latest_status = self.get_latest_status()
 
 
 class RescaleCluster(RescaleConnect):
@@ -262,10 +270,58 @@ class RescaleCluster(RescaleConnect):
 
         if json_data is not None:
             self._populate(self._request('POST',
-                                         'clusters/', data=json.dumps(json_data)).json())
+                                         'clusters/',
+                                         data=json.dumps(json_data)).json())
 
     def get_statuses(self):
-        return self._paginate('clusters/{cluster_id}/statuses/'.format(cluster_id=self.id))
+        return self._paginate('clusters/{cluster_id}/statuses/'
+                              .format(cluster_id=self.id))
+
+
+class RescaleStorageDevice(RescaleConnect):
+
+    def __init__(self, api_key=None, id=None, json_data=None, config=None):
+        super(RescaleStorageDevice, self).__init__(config=config)
+        self.api_key = api_key or self.api_key
+        if id is not None:
+            self._populate(self._request(
+                'GET', 'storage-devices/{id}/'.format(id=id)).json())
+
+        if json_data is not None:
+            self._populate(self._request('POST',
+                                         'storage-devices/',
+                                         data=json.dumps(json_data)).json())
+
+    def get_statuses(self):
+        return self._paginate('storage-devices/{id}/statuses/'
+                              .format(id=self.id))
+
+    def submit(self):
+        self._request('POST',
+                      'storage-devices/{id}/submit/'.format(id=self.id))
+
+    def wait_for_started(self):
+        statuses = self.get_statuses()
+        while not any(status['status'] == 'Started' for status in statuses):
+            statuses = self.get_statuses()
+            time.sleep(30)
+        self.refresh()
+
+    def connect_to_job(self, job):
+        data = {'storage_device': {'id': self.id }}
+        self._request('POST',
+                'jobs/{job_id}/storage-devices/'.format(job_id=job.id),
+                data=json.dumps(data))
+
+    def refresh(self):
+        self._populate(self._request('GET',
+                                     'storage-devices/{id}/'
+                                     .format(id=self.id)).json())
+
+
+def create_storage_device(config, name, size=1000, walltime=4):
+    sd_def = {'name': name, 'storage_size_mb': size, 'walltime': walltime}
+    return RescaleStorageDevice(json_data=sd_def, config=config)
 
 
 def list_running_jobs():
