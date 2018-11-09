@@ -25,7 +25,7 @@ JOB_TEMPLATE = {
                 "igCv": True
             },
             "hardware": {
-                "coresPerSlot": 2,
+                "coresPerSlot": 4,
                 "slots": 1,
                 "coreType": {
                     "code": "titanium"
