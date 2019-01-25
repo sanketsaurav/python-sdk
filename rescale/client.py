@@ -24,6 +24,8 @@ except ImportError:
     urlparse.urlencode = urllib.urlencode
     urllib.parse = urlparse
 
+logger = logging.getLogger(__name__)
+
 API_CONFIG_FILE = '~/.config/rescale/apiconfig'
 DEFAULT_API_URL = 'https://platform.rescale.com/api/v3/'
 
@@ -61,12 +63,14 @@ class RescaleConfig(object):
 
 class RescaleConnect(object):
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, attempts=None):
         if config is None:
             config = RescaleConfig()
         self.api_key = config.apikey()
         self._root_url = config.apiurl()
         self._page_size = 100
+        self._attempts = attempts or 1
+        self._retry_delay = 30
 
     def __repr__(self):
         return json.dumps(self._raw_data, sort_keys=True,
@@ -96,16 +100,28 @@ class RescaleConnect(object):
         if 'files' not in kwargs:
             headers['Content-Type'] = 'application/json'
 
-        response = requests.request(method,
-                                    urllib.parse.urljoin(
+        response = None
+        last_error = None
+        for i in range(self._attempts):
+            response = requests.request(method,
+                                        urllib.parse.urljoin(
                                         self._root_url, relative_url),
-                                    headers=headers,
-                                    **kwargs)
-        try:
-            response.raise_for_status()
-        except Exception as e:
-            logging.error(response.content)
-            raise e
+                                        headers=headers,
+                                        **kwargs)
+            try:
+                response.raise_for_status()
+            except Exception as e:
+                logger.exception('Error on attempt %s, %s',
+                                  i, response.content)
+                last_error = e
+                time.sleep(30)
+            else:
+                last_error = None
+                break
+
+        if last_error:
+            raise last_error
+
         return response
 
     @staticmethod
@@ -160,8 +176,8 @@ class RescaleFile(RescaleConnect):
 
 class RescaleJob(RescaleConnect):
 
-    def __init__(self, api_key=None, id=None, json_data=None, config=None):
-        super(RescaleJob, self).__init__(config=config)
+    def __init__(self, api_key=None, id=None, json_data=None, config=None, **kwargs):
+        super(RescaleJob, self).__init__(config=config, **kwargs)
         self.api_key = api_key or self.api_key
 
         if id is not None:
@@ -251,11 +267,19 @@ class RescaleJob(RescaleConnect):
         return results
 
     def wait_for_executing(self):
-        latest_status = None
+        latest_status = self.get_latest_status()
         while latest_status is None or \
               latest_status['status'] != 'Executing':
             time.sleep(30)
             latest_status = self.get_latest_status()
+
+    def wait_for_completed(self):
+        latest_status = self.get_latest_status()
+        while latest_status is None or \
+              latest_status['status'] != 'Completed':
+            time.sleep(30)
+            latest_status = self.get_latest_status()
+            logger.info('Latest state for %s: %s', self.id, latest_status)
 
 
 class RescaleCluster(RescaleConnect):

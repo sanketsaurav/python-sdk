@@ -1,7 +1,7 @@
 #!/bin/bash
 
 DIR=$(dirname "${BASH_SOURCE[0]}")
-virtualenv cli
+python3 -m venv cli
 . cli/bin/activate
 
 pushd $DIR
