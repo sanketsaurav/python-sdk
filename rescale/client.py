@@ -66,6 +66,7 @@ class RescaleConnect(object):
     def __init__(self, config=None, attempts=None):
         if config is None:
             config = RescaleConfig()
+        self.config = config
         self.api_key = config.apikey()
         self._root_url = config.apiurl()
         self._page_size = 100
@@ -112,7 +113,7 @@ class RescaleConnect(object):
                 response.raise_for_status()
             except Exception as e:
                 logger.exception('Error on attempt %s, %s',
-                                  i, response.content)
+                                 i, response.content)
                 last_error = e
                 time.sleep(30)
             else:
@@ -198,6 +199,19 @@ class RescaleJob(RescaleConnect):
         for json_data in self._paginate('jobs/{job_id}/files/'.format(job_id=self.id)):
             yield RescaleFile(self.api_key, json_data=json_data)
 
+    def get_clusters(self):
+        clusters = []
+        response = self._paginate('jobs/{job_id}/clusters/'.format(job_id=self.id)),
+
+        for r in response:
+            for json_data in r:
+                cluster = RescaleCluster(api_key=self.api_key)
+                cluster.id = json_data.get('id')
+                clusters.append(
+                    cluster
+                )
+        return clusters
+
     def get_file(self, name):
         query = urllib.parse.urlencode((('search', name),))
         results = self._paginate('jobs/{job_id}/files/?{query}'
@@ -211,8 +225,7 @@ class RescaleJob(RescaleConnect):
         return self._request('DELETE', 'jobs/{job_id}/'.format(job_id=self.id))
 
     def wait(self, refresh_rate=60):
-        while not self.get_latest_status()['status'] == 'Completed':
-            time.sleep(refresh_rate)
+        self.wait_for_completed()
 
     def userlogs(self):
         uri = 'jobs/{job_id}/logs/?limit=10000'.format(job_id=self.id)
@@ -266,20 +279,25 @@ class RescaleJob(RescaleConnect):
             results += status['result']
         return results
 
-    def wait_for_executing(self):
+    def wait_for_status(self, status, refresh_seconds=30):
         latest_status = self.get_latest_status()
         while latest_status is None or \
-              latest_status['status'] != 'Executing':
-            time.sleep(30)
+                latest_status['status'] != status:
+            time.sleep(refresh_seconds)
             latest_status = self.get_latest_status()
+        return self
+
+    def wait_for_executing(self):
+        return self.wait_for_status('Executing')
 
     def wait_for_completed(self):
-        latest_status = self.get_latest_status()
-        while latest_status is None or \
-              latest_status['status'] != 'Completed':
+        return self.wait_for_status('Completed')
+
+    def wait_for_cluster_shutdown(self):
+        clusters = self.get_clusters()
+        while not all(cluster.is_completed for cluster in clusters):
             time.sleep(30)
-            latest_status = self.get_latest_status()
-            logger.info('Latest state for %s: %s', self.id, latest_status)
+            logger.info('Waiting for cluster(s) to terminate.')
 
 
 class RescaleCluster(RescaleConnect):
@@ -300,6 +318,17 @@ class RescaleCluster(RescaleConnect):
     def get_statuses(self):
         return self._paginate('clusters/{cluster_id}/statuses/'
                               .format(cluster_id=self.id))
+
+    def get_latest_status(self):
+        return next(self.get_statuses(), None)
+
+    @property
+    def is_completed(self):
+        latest_status = self.get_latest_status()
+        if latest_status is not None:
+            return latest_status['status'] == 'Stopped'
+        else:
+            return False
 
 
 class RescaleStorageDevice(RescaleConnect):
@@ -323,36 +352,84 @@ class RescaleStorageDevice(RescaleConnect):
     def submit(self):
         self._request('POST',
                       'storage-devices/{id}/submit/'.format(id=self.id))
+        return self
 
     def wait_for_started(self):
         statuses = self.get_statuses()
         while not any(status['status'] == 'Started' for status in statuses):
             statuses = self.get_statuses()
             time.sleep(30)
-        self.refresh()
+        return self.refresh()
 
-    def connect_to_job(self, job):
-        data = {'storage_device': {'id': self.id }}
+    def copy_files_to_job(self, job, file_paths=None):
+        data = {'storage_device': {'id': self.id}}
+        if file_paths:
+            input_files = {
+                'jobanalyses': [{
+                    'order': 0,
+                    'input_files': [{
+                        'input_file_type': 'COPY',
+                        'source_path': path,
+                        'name': os.path.basename(path),
+                        'decompress': True,
+                        'output_path': ''
+                    } for path in file_paths]
+            }]}
+            data.update(input_files)
         self._request('POST',
                 'jobs/{job_id}/storage-devices/'.format(job_id=job.id),
                 data=json.dumps(data))
+        return self
+
+    def upload_cloud_file(self, rescale_file, dest_path):
+        if isinstance(rescale_file, str):
+            rescale_file = RescaleFile(id=rescale_file, config=self.config)
+        data = {'files': [{'id': rescale_file.id}],
+                'outputDir': dest_path}
+        print(data)
+        self._request(
+            'POST',
+            'storage-devices/{id}/file-downloads/'.format(id=self.id),
+            data=json.dumps(data))
+        return self
+
+    def upload_local_file(self, local_path, dest_path):
+        rescale_file = RescaleFile(file_path=local_path, config=self.config)
+        self.upload_cloud_file(rescale_file, dest_path)
+        return self
 
     def refresh(self):
         self._populate(self._request('GET',
                                      'storage-devices/{id}/'
                                      .format(id=self.id)).json())
+        return self
 
 
-def create_storage_device(config, name, size=1000, walltime=4):
-    sd_def = {'name': name, 'storage_size_mb': size, 'walltime': walltime}
+def create_storage_device(config,
+                          name,
+                          size_mb=1000,
+                          walltime=4,
+                          run_low_pri=False,
+                          cores=18):
+    sd_def = {'name': name,
+              'storage_size_mb': size_mb,
+              'walltime': walltime,
+              'cores_per_slot': cores}
     return RescaleStorageDevice(json_data=sd_def, config=config)
 
 
-def list_running_jobs():
-    connection = RescaleConnect()
+def list_running_jobs(config=None):
+    connection = RescaleConnect(config=config)
     return connection._paginate('jobs/?t=1')
 
 
-def list_running_clusters():
-    connection = RescaleConnect()
+def list_running_clusters(config=None):
+    connection = RescaleConnect(config=config)
     return connection._paginate('clusters/')
+
+
+def list_running_hps(config=None):
+    connection = RescaleConnect(config=config)
+    return (RescaleStorageDevice(id=hpsjson['id'], config=config)
+            for hpsjson in connection._paginate('storage-devices/?active=true'))
+
