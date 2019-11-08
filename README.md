@@ -1,3 +1,7 @@
+# DEPRECATED
+In favor of https://github.com/rescale/rescale-python-sdk
+
+
 python-sdk
 ==========
 
